@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Caixa Rei do Gado — v10.1 Meses · Executivo Multiusuário Firebase</title>
+  <title>Caixa Rei do Gado — v10.2 99Food · Executivo Multiusuário Firebase</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -272,6 +272,7 @@ p { margin: 4px 0 0; }
 .cash-month-summary .cash-month-caption { color:var(--text); font-size:13px; font-weight:700; }
 .cash-month-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .cash-month-empty { margin:0 0 16px; padding:14px 16px; border:1px dashed var(--line-strong); border-radius:12px; color:var(--muted); }
+.schedule-pending { margin:0 0 16px; padding:12px 14px; border:1px solid var(--orange-200); border-radius:12px; background:var(--orange-50); color:var(--text); font-size:12px; }
 @media (max-width:1200px) { .cash-month-grid { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 @media (max-width:480px) {
   .cash-month-toolbar { padding:14px; gap:12px; }
@@ -894,6 +895,7 @@ p { margin: 4px 0 0; }
               <strong id="calMonthTotal">R$ 0,00</strong>
             </div>
           </div>
+          <p class="schedule-pending" id="calPending99Food" hidden></p>
           <div class="cal-grid" id="calGrid"></div>
           <div class="cal-legend">
             <span class="cal-leg-dot" style="background:rgba(255,107,53,0.2)"></span> Recebimento baixo
@@ -1075,6 +1077,17 @@ const fmtDateBR    = (iso) => { const [y,m,d]=iso.split("-"); return `${d}/${m}/
 const fmtDateShort = (iso) => { const [y,m,d]=iso.split("-"); return `${d}/${m}`; };
 const MES_NOMES = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
 const MES_NOMES_LONGOS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+// Ordem única para colunas, novos lançamentos, somas e gráficos de venda.
+const SALES_CHANNELS = [
+  {k:"pix",      lbl:"PIX",      cor:"#22C55E"},
+  {k:"dinheiro", lbl:"Dinheiro", cor:"#10B981"},
+  {k:"credito",  lbl:"Crédito",  cor:"#6366F1"},
+  {k:"debito",   lbl:"Débito",   cor:"#3B82F6"},
+  {k:"ifood",    lbl:"iFood",    cor:"#EF4444"},
+  {k:"food99",   lbl:"99Food",   cor:"#EAB308"},
+];
+const emptySales = () => Object.fromEntries(SALES_CHANNELS.map(({k})=>[k,0]));
+const salesColumnClass = (index) => index === 0 ? "grp-start" : index === SALES_CHANNELS.length-1 ? "grp-end" : "";
 const monthLabelLong = (mes) => {
   if (!mes || !mes.includes("-")) return "—";
   const [y,mo] = mes.split("-");
@@ -1135,6 +1148,8 @@ const paymentDate = (iso, forma) => {
   if (forma==="debito")   { const d = addDays(iso,1); return isBusinessDay(d) ? d : nextBusinessDay(iso); }
   if (forma==="credito")  return addBusinessDays(iso, 2);
   if (forma==="ifood")    return ifoodPaymentDate(iso);
+  // Repasses 99Food às quartas; falta confirmar o período de fechamento das vendas.
+  if (forma==="food99")   return null;
   return iso;
 };
 
@@ -1249,7 +1264,7 @@ function render() {
 // ----- VISÃO GERAL -----
 function renderOverview() {
   const mes = state.caixa.filter(d=>monthKey(d.data)===state.monthFilter).sort((a,b)=>a.data.localeCompare(b.data));
-  const tot = { pix:0, dinheiro:0, credito:0, debito:0, ifood:0 };
+  const tot = emptySales();
   let totalMoto = 0;
   const perMoto = {}; state.motoboys.forEach(m=>perMoto[m.id]=0);
 
@@ -1307,8 +1322,8 @@ function renderOverview() {
     <div class="highlight-row"><span class="highlight-icon">≻</span><div><strong>${diasAcimaMedia} dias acima da média</strong><small>Média diária atual: ${fmt(ticket)}.</small></div></div>
   `;
 
-  const colors = {pix:"#22C55E", dinheiro:"#10B981", credito:"#6366F1", debito:"#3B82F6", ifood:"#EF4444"};
-  const labels = {pix:"PIX", dinheiro:"Dinheiro", credito:"Crédito", debito:"Débito", ifood:"iFood"};
+  const colors = Object.fromEntries(SALES_CHANNELS.map(({k,cor})=>[k,cor]));
+  const labels = Object.fromEntries(SALES_CHANNELS.map(({k,lbl})=>[k,lbl]));
   charts.payment?.destroy();
   charts.payment = new Chart($("#chartPayment"), {
     type:"doughnut",
@@ -1392,7 +1407,7 @@ function renderCash() {
       <th rowspan="2" class="td-fixa">Data</th>
       <th rowspan="2" class="grp-end">Abertura</th>
       <th rowspan="2">Responsável</th>
-      <th colspan="5" class="group group-vendas grp-end">Vendas</th>
+      <th colspan="${SALES_CHANNELS.length}" class="group group-vendas grp-end">Vendas</th>
       <th rowspan="2" class="grp-end">Total</th>
       <th colspan="${nMoto}" class="group group-moto">Motoboys</th>
       <th rowspan="2" class="grp-end grp-start">Pag. motoboy</th>
@@ -1400,11 +1415,7 @@ function renderCash() {
       <th rowspan="2"></th>
     </tr>
     <tr>
-      <th class="grp-start">PIX</th>
-      <th>Dinheiro</th>
-      <th>Crédito</th>
-      <th>Débito</th>
-      <th class="grp-end">iFood</th>
+      ${SALES_CHANNELS.map((f,i)=>`<th class="${salesColumnClass(i)}">${f.lbl}</th>`).join("")}
       ${motoboysDoMes.map((m,i) => `<th class="th-moto ${i===0?'grp-start':''}" data-id="${m.id}">
         <div class="moto-head">
           <button type="button" class="moto-name" data-id="${m.id}" title="Clique para renomear">${escapeHtml(m.nome)} <span class="edit-ico">✎</span></button>
@@ -1427,11 +1438,7 @@ function renderCash() {
       <td class="td-fixa"><strong>${fmtDateShort(d.data)}</strong></td>
       <td class="grp-end"><input type="text" data-field="abertura" value="${fmtN(d.abertura)}"/></td>
       <td><input type="text" data-field="responsavel" value="${escapeHtml(d.responsavel||"")}"/></td>
-      <td class="grp-start"><input type="text" data-field="vendas.pix" value="${fmtN(d.vendas?.pix)}"/></td>
-      <td><input type="text" data-field="vendas.dinheiro" value="${fmtN(d.vendas?.dinheiro)}"/></td>
-      <td><input type="text" data-field="vendas.credito" value="${fmtN(d.vendas?.credito)}"/></td>
-      <td><input type="text" data-field="vendas.debito" value="${fmtN(d.vendas?.debito)}"/></td>
-      <td class="grp-end"><input type="text" data-field="vendas.ifood" value="${fmtN(d.vendas?.ifood)}"/></td>
+      ${SALES_CHANNELS.map((f,i)=>`<td class="${salesColumnClass(i)}"><input type="text" data-field="vendas.${f.k}" aria-label="${f.lbl} em ${fmtDateBR(d.data)}" value="${fmtN(d.vendas?.[f.k])}"/></td>`).join("")}
       <td class="grp-end td-total"><strong>${fmt(totalDay(d))}</strong></td>
       ${motoboysDoMes.map((m,i) => `<td ${i===0?'class="grp-start"':''}><input type="text" data-field="motoboys.${m.id}" value="${fmtN(d.motoboys?.[m.id])}"/></td>`).join("")}
       <td class="grp-end grp-start td-total td-auto"><strong>${fmt(motoTotalDay(d))}</strong></td>
@@ -1442,11 +1449,11 @@ function renderCash() {
     </tr>
   `).join("");
 
-  const tot = { abertura:0, pix:0, dinheiro:0, credito:0, debito:0, ifood:0, total:0, pagto_moto:0 };
+  const tot = { abertura:0, ...emptySales(), total:0, pagto_moto:0 };
   const totMoto = totaisMotoMes;
   dias.forEach(d => {
     tot.abertura += Number(d.abertura||0);
-    Object.keys(d.vendas||{}).forEach(k=>tot[k]+=Number(d.vendas[k]||0));
+    SALES_CHANNELS.forEach(({k})=>tot[k]+=Number(d.vendas?.[k]||0));
     tot.total += totalDay(d);
     tot.pagto_moto += motoTotalDay(d);
   });
@@ -1455,8 +1462,7 @@ function renderCash() {
       <td class="td-fixa">Totais</td>
       <td class="grp-end">${fmt(tot.abertura)}</td>
       <td></td>
-      <td class="grp-start">${fmt(tot.pix)}</td><td>${fmt(tot.dinheiro)}</td><td>${fmt(tot.credito)}</td><td>${fmt(tot.debito)}</td>
-      <td class="grp-end">${fmt(tot.ifood)}</td>
+      ${SALES_CHANNELS.map((f,i)=>`<td class="${salesColumnClass(i)}">${fmt(tot[f.k])}</td>`).join("")}
       <td class="grp-end">${fmt(tot.total)}</td>
       ${motoboysDoMes.map((m,i)=>`<td ${i===0?'class="grp-start"':''}>${fmt(totMoto[m.id])}</td>`).join("")}
       <td class="grp-end grp-start">${fmt(tot.pagto_moto)}</td>
@@ -1659,7 +1665,7 @@ $("#btnAddDay").addEventListener("click", () => {
     const novo = {
       data: vals.data, abertura: Number(vals.abertura)||0,
       responsavel: vals.responsavel||"",
-      vendas: {pix:0,dinheiro:0,credito:0,debito:0,ifood:0}, pagto_moto: 0,
+      vendas: emptySales(), pagto_moto: 0,
       motoboys: Object.fromEntries(motoboysDoMes(monthKey(vals.data)).map(m=>[m.id,0])),
       observacao: "",
     };
@@ -1872,16 +1878,10 @@ function renderSchedule() {
 
   const porDia = {};
   state.caixa.forEach(d => {
-    const formas = [
-      {k:"pix",      lbl:"PIX",      cor:"#22C55E"},
-      {k:"dinheiro", lbl:"Dinheiro", cor:"#10B981"},
-      {k:"debito",   lbl:"Débito",   cor:"#3B82F6"},
-      {k:"credito",  lbl:"Crédito",  cor:"#6366F1"},
-      {k:"ifood",    lbl:"iFood",    cor:"#EF4444"},
-    ];
-    formas.forEach(f => {
+    SALES_CHANNELS.forEach(f => {
       const v = Number(d.vendas?.[f.k]||0); if (v<=0) return;
       const dp = paymentDate(d.data, f.k);
+      if (!dp) return;
       if (!porDia[dp]) porDia[dp] = { total:0, formas:{}, refs:[] };
       porDia[dp].total += v;
       porDia[dp].formas[f.lbl] = (porDia[dp].formas[f.lbl]||0) + v;
@@ -1899,6 +1899,11 @@ function renderSchedule() {
     .filter(([k])=>k.startsWith(state.scheduleMonth))
     .reduce((a,[,v])=>a+v.total,0);
   $("#calMonthTotal").textContent = fmt(totalMes);
+  const pending99Food = state.caixa
+    .filter(d=>monthKey(d.data)===state.scheduleMonth)
+    .reduce((sum,d)=>sum+Number(d.vendas?.food99||0),0);
+  $("#calPending99Food").hidden = pending99Food === 0;
+  $("#calPending99Food").textContent = `99Food — repasses às quartas-feiras: ${fmt(pending99Food)} em vendas de ${monthLabelLong(state.scheduleMonth)}, com período de fechamento a definir. Este valor ainda não entra no calendário de recebimentos.`;
 
   const grid = $("#calGrid");
   grid.innerHTML = "";
