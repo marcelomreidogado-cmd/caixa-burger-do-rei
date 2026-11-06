@@ -8,9 +8,9 @@ Sistema de caixa diário, visão gerencial e pagamentos de motoboy, com salvamen
 
 O GitHub Pages publica o conteúdo da raiz da branch `main`. Alterações enviadas a essa branch atualizam o site automaticamente. Não é necessário publicar pelo Firebase Hosting.
 
-`index.html` é o único arquivo do aplicativo. `.nojekyll` mantém a publicação estática direta. A versão atual é a v10.2, com 99Food após iFood no Caixa Diário, total por plataforma e inclusão no faturamento e nos gráficos. Permanecem os 12 botões de meses, o layout responsivo e a navegação entre anos.
+`index.html` é o único arquivo do aplicativo. `.nojekyll` mantém a publicação estática direta. A versão atual é a v10.3, com 99Food após iFood no Caixa Diário, total por plataforma e inclusão no faturamento e nos gráficos. Permanecem os 12 botões de meses, o layout responsivo e a navegação entre anos.
 
-A 99Food usa o campo `vendas.food99`, salvo por célula. Dias antigos sem esse campo exibem zero; não há migração ou regravação do histórico. Novos dias já incluem o canal. Os repasses ocorrem às quartas-feiras, mas falta confirmar o período de fechamento das vendas: por isso, a Agenda Financeira mostra o valor mensal da 99Food com essa informação, fora das datas e totais de recebimentos previstos até a confirmação.
+A 99Food usa o campo `vendas.food99`, salvo por célula. Dias antigos sem esse campo exibem zero; não há migração ou regravação do histórico. Novos dias já incluem o canal. As vendas de segunda a domingo são previstas para a quarta-feira da semana seguinte, conforme a regra informada pela loja. A Agenda Financeira inclui a 99Food nos totais e no detalhamento do dia de repasse, inclusive quando a semana atravessa meses ou anos.
 
 ## Dados e sincronização
 
@@ -22,7 +22,7 @@ Os dados são carregados do Firestore. Não há cópia dos lançamentos nem impo
 
 A alteração passou por 16 verificações locais: navegação pelos 12 meses e por anos, meses vazios, seis larguras de tela entre 320 e 1440 px, seleção por teclado, seis abas, inclusão e exclusão, pagamentos de motoboy e duas sessões com edição concorrente de células distintas no Firestore Emulator. Os testes mantêm o banco de produção separado.
 
-A v10.2 acrescentou 11 verificações para a 99Food: compatibilidade com dias antigos, ordem e alinhamento da coluna, valores com vírgula decimal, somas, gráficos e percentuais, dia com venda somente na plataforma, gravação concorrente com iFood, recarregamento, novo dia, valor zerado e apresentação dos repasses sem período de fechamento confirmado.
+A v10.3 acrescentou 11 verificações para a 99Food: compatibilidade com dias antigos, ordem e alinhamento da coluna, valores com vírgula decimal, somas, gráficos e percentuais, dia com venda somente na plataforma, gravação concorrente com iFood, recarregamento, novo dia, valor zerado e apresentação dos repasses.
 
 ## Reverter uma atualização
 

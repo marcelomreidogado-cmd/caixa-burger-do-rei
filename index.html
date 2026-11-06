@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Caixa Rei do Gado — v10.2 99Food · Executivo Multiusuário Firebase</title>
+  <title>Caixa Rei do Gado — v10.3 99Food · Executivo Multiusuário Firebase</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -895,7 +895,7 @@ p { margin: 4px 0 0; }
               <strong id="calMonthTotal">R$ 0,00</strong>
             </div>
           </div>
-          <p class="schedule-pending" id="calPending99Food" hidden></p>
+          <p class="schedule-pending">99Food: vendas de segunda a domingo são previstas para a quarta-feira da semana seguinte.</p>
           <div class="cal-grid" id="calGrid"></div>
           <div class="cal-legend">
             <span class="cal-leg-dot" style="background:rgba(255,107,53,0.2)"></span> Recebimento baixo
@@ -1142,14 +1142,19 @@ const ifoodPaymentDate = (iso) => {
   dt.setDate(dt.getDate()+off+30);
   return dt.toISOString().slice(0,10);
 };
+const food99PaymentDate = (iso) => {
+  const weekday = new Date(iso+"T12:00:00").getDay();
+  const daysSinceMonday = (weekday + 6) % 7;
+  return addDays(iso, 9 - daysSinceMonday);
+};
 const paymentDate = (iso, forma) => {
   if (forma==="dinheiro") return iso;
   if (forma==="pix")      return addDays(iso, 1);
   if (forma==="debito")   { const d = addDays(iso,1); return isBusinessDay(d) ? d : nextBusinessDay(iso); }
   if (forma==="credito")  return addBusinessDays(iso, 2);
   if (forma==="ifood")    return ifoodPaymentDate(iso);
-  // Repasses 99Food às quartas; falta confirmar o período de fechamento das vendas.
-  if (forma==="food99")   return null;
+  // Vendas de segunda a domingo: repasse na quarta da semana seguinte.
+  if (forma==="food99")   return food99PaymentDate(iso);
   return iso;
 };
 
@@ -1899,11 +1904,7 @@ function renderSchedule() {
     .filter(([k])=>k.startsWith(state.scheduleMonth))
     .reduce((a,[,v])=>a+v.total,0);
   $("#calMonthTotal").textContent = fmt(totalMes);
-  const pending99Food = state.caixa
-    .filter(d=>monthKey(d.data)===state.scheduleMonth)
-    .reduce((sum,d)=>sum+Number(d.vendas?.food99||0),0);
-  $("#calPending99Food").hidden = pending99Food === 0;
-  $("#calPending99Food").textContent = `99Food — repasses às quartas-feiras: ${fmt(pending99Food)} em vendas de ${monthLabelLong(state.scheduleMonth)}, com período de fechamento a definir. Este valor ainda não entra no calendário de recebimentos.`;
+
 
   const grid = $("#calGrid");
   grid.innerHTML = "";
@@ -1937,9 +1938,11 @@ function renderSchedule() {
       const ifoodPill = ifoodVal > 0
         ? `<div class="cal-ifood">iFood ${fmt(ifoodVal)}</div>`
         : "";
+      const food99Val = info.formas["99Food"] || 0;
+      const food99Pill = food99Val > 0 ? `<div class="cal-ifood">99Food ${fmt(food99Val)}</div>` : "";
       cell.innerHTML = `<div class="cal-top"><div class="cal-num">${d}</div>${iso<hoje?'<span class="cal-recebido" title="já recebido">✓</span>':''}</div>
                         <div class="cal-val">${fmt(info.total)}</div>
-                        ${ifoodPill}`;
+                        ${ifoodPill}${food99Pill}`;
       if (ifoodVal > 0) cell.classList.add("tem-ifood");
       cell.addEventListener("click", () => showDayDetails(iso, info));
     } else {
