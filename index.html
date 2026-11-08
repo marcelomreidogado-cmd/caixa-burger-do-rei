@@ -2,6 +2,8 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
+<meta name="caixa-build" content="CAIXA_BURGER_2026_11_08_RASCUNHOS_V1">
+<!-- Rascunhos locais e gravação transacional das edições do caixa. A integração de fechamento mensal permanece desativada. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Caixa Rei do Gado — v10.3 99Food · Executivo Multiusuário Firebase</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -733,6 +735,7 @@ p { margin: 4px 0 0; }
           </div>
         </div>
         <p class="cash-month-empty" id="cashMonthEmpty" hidden></p>
+        <div class="card" id="cashDraftNotice" role="status" hidden></div>
 
         <div class="card">
           <div class="table-scroll">
@@ -941,7 +944,7 @@ p { margin: 4px 0 0; }
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc,
+  getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ===== CONFIG =====
@@ -1158,6 +1161,156 @@ const paymentDate = (iso, forma) => {
   return iso;
 };
 
+(function(root){
+  'use strict';
+  // Each tab owns separate keys; another tab cannot overwrite its pending values.
+  function create(storage,key,writeField,options={}){
+    const owner=options.owner||'default',prefix=key+'::',inFlight=new Map();
+    if(!/^[a-zA-Z0-9_-]{1,100}$/.test(owner)||typeof storage.key!=='function'||typeof storage.removeItem!=='function')throw Error('Armazenamento de rascunhos indisponível');
+    const storageKey=idKey=>prefix+encodeURIComponent(idKey);
+    const resolvedKey=(idKey,version)=>key+'__resolved::'+encodeURIComponent(idKey)+'::'+version;
+    function get(idKey){const raw=storage.getItem(storageKey(idKey));if(!raw)return null;const v=JSON.parse(raw);if(!v||typeof v!=='object'||v.key!==idKey)throw Error('Rascunho inválido');return v;}
+    function save(entry){storage.setItem(storageKey(entry.key),JSON.stringify(entry));}
+    function all(){const keys=[];for(let i=0;i<storage.length;i++){const k=storage.key(i);if(k?.startsWith(prefix))keys.push(k);}return keys.map(k=>{const raw=storage.getItem(k);if(!raw)return null;const v=JSON.parse(raw);if(!v||typeof v!=='object'||storageKey(v.key)!==k)throw Error('Rascunho inválido');return v;}).filter(Boolean).sort((a,b)=>a.key.localeCompare(b.key));}
+    function isResolved(entry){return storage.getItem(resolvedKey(entry.key,entry.version))==='1';}
+    function list(){return all().filter(x=>x.owner===owner||!isResolved(x)).map(x=>JSON.parse(JSON.stringify(x)));}
+    function own(){return list().filter(x=>x.owner===owner);}
+    function add(id,field,desired,before,opts={}){
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(id||'')||!/^(abertura|responsavel|observacao|vendas\.(pix|dinheiro|credito|debito|ifood|food99)|motoboys\.[a-zA-Z0-9_-]+)$/.test(field||''))throw Error('Lançamento inválido');
+      if(!['string','number'].includes(typeof desired)||(typeof desired==='number'&&!Number.isFinite(desired)))throw Error('Valor inválido');
+      if(own().some(x=>x.id===id&&x.field==='__day'))throw Error('Resolva a alteração pendente deste dia antes de editar.');
+      if(opts.raw!==undefined&&(typeof opts.raw!=='string'||opts.raw.length>10000))throw Error('Texto inválido');
+      const idKey=owner+'|'+id+'|'+field,prior=get(idKey),entry={key:idKey,owner,id,field,desired,before:prior?prior.before:before,version:(prior?.version||0)+1,ready:opts.ready!==false,...(prior?.adoptedFrom?{adoptedFrom:prior.adoptedFrom,adoptedVersion:prior.adoptedVersion}:{}),...(opts.raw!==undefined?{raw:opts.raw}:{})};
+      save(entry);return idKey;
+    }
+    function addDay(id,operation,value){
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(id||'')||!['create','delete'].includes(operation)||!value||typeof value!=='object'||value.data!==id)throw Error('Dia inválido');
+      if(own().some(x=>x.id===id))throw Error('Resolva os rascunhos deste dia antes de continuar.');
+      const idKey=owner+'|'+id+'|__day';save({key:idKey,owner,id,field:'__day',operation,value,version:1});return idKey;
+    }
+    function adopt(idKey){
+      const original=get(idKey);if(!original||original.owner===owner)throw Error('Rascunho não encontrado.');
+      if(own().some(x=>x.id===original.id&&(x.field===original.field||x.field==='__day'||original.field==='__day')))throw Error('Já existe um rascunho desta edição nesta aba.');
+      const newKey=owner+'|'+original.id+'|'+original.field;save({...original,key:newKey,owner,version:1,adoptedFrom:original.key,adoptedVersion:original.version});return newKey;
+    }
+    async function retry(idKey){
+      if(inFlight.has(idKey))return inFlight.get(idKey);
+      const promise=(async()=>{const entry=get(idKey);if(!entry)return {status:'missing'};if(entry.owner!==owner)return {status:'pending',error:'Este rascunho pertence a outra aba.'};if(entry.ready===false)return {status:'pending',error:'Termine de editar o campo antes de salvar.'};
+        try{await writeField(entry);}catch(error){return {status:'pending',code:error.code||'',error:String(error.message||error)};}
+        const current=get(idKey);if(!current)return {status:'saved'};
+        try{if(current.version===entry.version){if(current.adoptedFrom)storage.setItem(resolvedKey(current.adoptedFrom,current.adoptedVersion),'1');storage.removeItem(storageKey(idKey));}else save({...current,before:{present:true,value:entry.desired}});}
+        catch(error){return {status:'pending',error:'Gravação confirmada, mas o rascunho não pôde ser atualizado.'};}
+        return {status:current.version===entry.version?'saved':'changed'};
+      })();inFlight.set(idKey,promise);try{return await promise;}finally{inFlight.delete(idKey);}
+    }
+    function discard(idKey){const e=get(idKey);if(e?.owner!==owner)throw Error('Este rascunho pertence a outra aba.');if(inFlight.has(idKey))throw Error('Aguarde a gravação terminar.');storage.removeItem(storageKey(idKey));}
+    return {owner,add,addDay,adopt,retry,list,own,discard};
+  }
+  root.BurgerCashDrafts={create};
+})(typeof window==='undefined'?globalThis:window);
+
+(function(root){
+  'use strict';
+  const valid=/^(abertura|responsavel|observacao|vendas\.(pix|dinheiro|credito|debito|ifood|food99)|motoboys\.[a-zA-Z0-9_-]+)$/;
+  function readField(doc,field){let x=doc;for(const part of field.split('.')){if(!x||typeof x!=='object'||!Object.hasOwn(x,part))return {present:false};x=x[part];}return {present:true,value:x};}
+  function canonical(v){if(Array.isArray(v))return v.map(canonical);if(v&&typeof v==='object')return Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])]));return v;}
+  async function execute(ref,run,entry){
+    return run(async tx=>{
+      const snap=await tx.get(ref);const exists=typeof snap.exists==='function'?snap.exists():snap.exists;if(!exists)throw Error('O dia não existe mais no caixa. Confira antes de continuar.');
+      const current=readField(snap.data(),entry.field);
+      if(current.present&&Object.is(current.value,entry.desired))return 'already';
+      if(current.present!==entry.before.present||(current.present&&!Object.is(current.value,entry.before.value)))throw Error('Outro computador alterou este valor. Confira antes de salvar.');
+      tx.update(ref,{[entry.field]:entry.desired});return 'saved';
+    });
+  }
+  function validate(db,entry){
+    const validDate=s=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(s||''))return false;const d=new Date(s+'T12:00:00Z');return !Number.isNaN(d.valueOf())&&d.toISOString().slice(0,10)===s;};
+    if(!db||!entry||!validDate(entry.id))throw Error('Rascunho inválido');
+    if(entry.field==='__day'&&['create','delete'].includes(entry.operation)&&entry.value&&typeof entry.value==='object'&&entry.value.data===entry.id)return;
+    if(!valid.test(entry.field||'')||!entry.before||typeof entry.before.present!=='boolean'||(entry.before.present&&!Object.hasOwn(entry.before,'value')))throw Error('Rascunho inválido');
+    const text=['responsavel','observacao'].includes(entry.field);
+    if(text?(typeof entry.desired!=='string'||entry.desired.length>10000):(typeof entry.desired!=='number'||!Number.isFinite(entry.desired)))throw Error('Valor do rascunho inválido');
+  }
+  async function executeDay(ref,run,entry){
+    return run(async tx=>{
+      const snap=await tx.get(ref),exists=typeof snap.exists==='function'?snap.exists():snap.exists;
+      if(entry.operation==='create'){
+        if(exists){if(JSON.stringify(canonical(snap.data()))===JSON.stringify(canonical(entry.value)))return 'already';throw Error('Já existe um dia diferente nesta data. Confira antes de continuar.');}
+        tx.set(ref,entry.value);return 'saved';
+      }
+      if(!exists)return 'already';
+      if(JSON.stringify(canonical(snap.data()))!==JSON.stringify(canonical(entry.value)))throw Error('Outro computador alterou este dia. Confira antes de excluir.');
+      tx.delete(ref);return 'saved';
+    });
+  }
+  async function write(db,entry){
+    validate(db,entry);
+    const ref=db.collection('caixa').doc(entry.id);
+    return (entry.field==='__day'?executeDay:execute)(ref,fn=>db.runTransaction(fn),entry);
+  }
+  async function writeModular(db,entry,api){validate(db,entry);if(!api||typeof api.doc!=='function'||typeof api.runTransaction!=='function')throw Error('Conexão inválida');return (entry.field==='__day'?executeDay:execute)(api.doc(db,'caixa',entry.id),fn=>api.runTransaction(db,fn),entry);}
+  root.BurgerCashDraftWriter={readField,write,writeModular};
+})(typeof window==='undefined'?globalThis:window);
+
+// Edições do caixa só são removidas dos rascunhos após confirmação do servidor.
+const cashDraftErrors=new Map();
+let cashRenderDeferred=false;
+let cashDraftFault='';
+function cashFieldFocused(){return state.view==='cash'&&!!document.activeElement?.matches('#cashBody input');}
+function cashSafeRefresh(){if(cashFieldFocused()){cashRenderDeferred=true;cashDraftRender();return;}cashRenderDeferred=false;if(state.view==='cash')renderCash();}
+function cashFieldBlur(e){onCellChange(e);setTimeout(()=>{if(cashRenderDeferred)cashSafeRefresh();},0);}
+let cashDraftQueue=null;
+try{const ownerKey='burger_caixa_aba_v1',nav=performance.getEntriesByType('navigation')[0]?.type;let owner=sessionStorage.getItem(ownerKey);if(!owner||nav==='navigate'){owner=crypto.randomUUID();sessionStorage.setItem(ownerKey,owner);}cashDraftQueue=window.BurgerCashDrafts.create(localStorage,'burger_caixa_edicoes_pendentes_v2',entry=>window.BurgerCashDraftWriter.writeModular(db,entry,{doc,runTransaction}),{owner});}
+catch(e){console.warn('Rascunhos indisponíveis:',e.message);}
+window.addEventListener('storage',e=>{if(e.key?.startsWith('burger_caixa_edicoes_pendentes_v2::'))cashDraftRender();});
+function cashPending(id,field){try{return cashDraftQueue?.own().find(x=>x.id===id&&x.field===field);}catch(e){cashDraftFault=e.message;return null;}}
+function cashDraftDisplay(day,field,original,numeric=false){const draft=cashPending(day.data,field),value=draft?.raw!==undefined?draft.raw:draft?draft.desired:original;return escapeHtml(numeric&&draft?.raw===undefined?fmtN(value):value??'');}
+function cashDraftErrorText(d){
+  const error=cashDraftErrors.get(d.key)||'';
+  if(!error.includes('Outro computador alterou este valor'))return error;
+  const day=state.caixa.find(x=>x.data===d.id),current=window.BurgerCashDraftWriter.readField(day,d.field);
+  const saved=current.present?(typeof current.value==='number'?fmt(current.value):String(current.value??'')):'sem valor';
+  return error+' Último valor recebido: '+saved+'. Para alterar, descarte este rascunho e digite novamente após conferir.';
+}
+function cashDraftRender(){
+  const box=$('#cashDraftNotice');if(!box)return;
+  let all=[];try{all=cashDraftQueue?.list()||[];}catch(e){cashDraftFault=e.message;}
+  if(cashDraftFault){box.hidden=false;box.textContent='Não foi possível ler as alterações guardadas neste navegador. Não faça novas edições até conferir os rascunhos.';return;}
+  const drafts=all.filter(d=>d.owner===cashDraftQueue.owner||!all.some(a=>a.owner===cashDraftQueue.owner&&a.adoptedFrom===d.key&&a.adoptedVersion===d.version));box.hidden=!drafts.length&&!!cashDraftQueue;
+  if(!cashDraftQueue){box.textContent='Não foi possível acessar os rascunhos neste computador. Confira o armazenamento do navegador antes de editar.';return;}
+  if(!drafts.length){box.innerHTML='';return;}
+  const label=x=>x.field==='__day'?(x.operation==='create'?'Novo dia':'Excluir dia'):x.field.replace(/^vendas\./,'Vendas: ').replace(/^motoboys\./,'Motoboy: ');
+  box.innerHTML='<strong>Alterações ainda não confirmadas no servidor</strong><p>Estão guardadas neste navegador. Confira e tente salvar novamente.</p>'+drafts.map((d,i)=>`<div><span>${escapeHtml(fmtDateBR(d.id))} · ${escapeHtml(label(d))}${d.field==='__day'?'':' · '+escapeHtml(d.ready===false?d.raw:typeof d.desired==='number'?fmt(d.desired):d.desired)}</span> ${d.owner!==cashDraftQueue.owner?`<small>Rascunho de outra aba.</small> <button class="btn compact" data-draft-adopt="${i}">Recuperar nesta aba</button>`:`<button class="btn compact" data-draft-retry="${i}" ${d.ready===false?'disabled':''}>Tentar salvar</button> <button class="btn compact" data-draft-discard="${i}">Descartar</button>${d.ready===false?'<small> Termine de editar o campo.</small>':cashDraftErrors.has(d.key)?'<small> '+escapeHtml(cashDraftErrorText(d))+'</small>':''}`}</div>`).join('');
+  box.querySelectorAll('[data-draft-adopt]').forEach(b=>b.onclick=()=>{const d=drafts[Number(b.dataset.draftAdopt)];if(!d)return;try{cashDraftQueue.adopt(d.key);cashSafeRefresh();}catch(e){alert(e.message);}});
+  box.querySelectorAll('[data-draft-retry]').forEach(b=>b.onclick=()=>cashDraftRetry(drafts[Number(b.dataset.draftRetry)]?.key));
+  box.querySelectorAll('[data-draft-discard]').forEach(b=>b.onclick=()=>{const d=drafts[Number(b.dataset.draftDiscard)];if(!d||!confirm('Descartar esta alteração não salva?'))return;try{cashDraftQueue.discard(d.key);cashDraftErrors.delete(d.key);renderCash();}catch(e){alert(e.message);}});
+}
+async function cashDraftRetry(key){
+  if(!key||!cashDraftQueue)return;
+  cashDraftErrors.delete(key);cashDraftRender();const result=await cashDraftQueue.retry(key);
+  if(result.status==='pending')cashDraftErrors.set(key,result.code==='permission-denied'?'Não foi possível salvar. Aguarde a conferência do mês e tente novamente.':result.code==='unavailable'?'Sem conexão com o servidor.':result.error||'Não foi possível confirmar.');
+  if(result.status==='changed')cashDraftErrors.set(key,'Há um valor mais recente para confirmar.');
+  cashSafeRefresh();
+}
+function cashQueueField(day,field,desired){
+  if(!cashDraftQueue||cashDraftFault){alert('O valor não foi salvo. Não foi possível conferir os rascunhos deste navegador.');return false;}
+  const existing=cashPending(day.data,field);if(existing&&existing.ready!==false&&Object.is(existing.desired,desired))return true;
+  const before=window.BurgerCashDraftWriter.readField(day,field);if(!existing&&before.present&&Object.is(before.value,desired))return true;
+  try{const key=cashDraftQueue.add(day.data,field,desired,before);cashSafeRefresh();void cashDraftRetry(key);return true;}
+  catch(e){if(['QuotaExceededError','SecurityError'].includes(e.name)){cashDraftFault=e.message;cashDraftRender();}alert('O valor não foi salvo: '+e.message);return false;}
+}
+function cashStageInput(e){
+  const input=e.target,day=state.caixa.find(d=>d.data===input.closest('tr')?.dataset.id);if(!day||!cashDraftQueue||cashDraftFault)return;
+  const field=input.dataset.field,raw=input.value,textFields=new Set(['responsavel','observacao']),desired=textFields.has(field)?raw:parseNum(raw);
+  try{cashDraftQueue.add(day.data,field,desired,window.BurgerCashDraftWriter.readField(day,field),{raw,ready:false});cashDraftRender();}
+  catch(e){if(['QuotaExceededError','SecurityError'].includes(e.name)){cashDraftFault=e.message;cashDraftRender();}alert('A edição ainda não está guardada: '+e.message);}
+}
+function cashQueueDay(day,operation){
+  if(!cashDraftQueue||cashDraftFault){alert('A alteração não foi salva. Não foi possível conferir os rascunhos deste navegador.');return false;}
+  try{const key=cashDraftQueue.addDay(day.data,operation,day);renderCash();void cashDraftRetry(key);return true;}
+  catch(e){alert('A alteração não foi salva: '+e.message);return false;}
+}
+
 // ===== STATUS =====
 function setStatus(online) {
   const dot = $("#connStatus"), txt = $("#connText");
@@ -1257,6 +1410,7 @@ function renderCashMonthNavigation() {
 // ===== RENDER =====
 let charts = {};
 function render() {
+  if(cashFieldFocused()){cashRenderDeferred=true;cashDraftRender();return;}
   refreshMonthFilter();
   if (state.view==="overview")   renderOverview();
   if (state.view==="cash")       renderCash();
@@ -1385,6 +1539,7 @@ function renderCash() {
 
   availableMonths();
   renderCashMonthNavigation();
+  cashDraftRender();
 
   const diasMesSelecionado = state.caixa.filter(d=>monthKey(d.data)===state.monthFilter);
   const totalMesSelecionado = diasMesSelecionado.reduce((a,d)=>a+totalDay(d),0);
@@ -1441,13 +1596,13 @@ function renderCash() {
   body.innerHTML = dias.map(d => `
     <tr data-id="${d.data}">
       <td class="td-fixa"><strong>${fmtDateShort(d.data)}</strong></td>
-      <td class="grp-end"><input type="text" data-field="abertura" value="${fmtN(d.abertura)}"/></td>
-      <td><input type="text" data-field="responsavel" value="${escapeHtml(d.responsavel||"")}"/></td>
-      ${SALES_CHANNELS.map((f,i)=>`<td class="${salesColumnClass(i)}"><input type="text" data-field="vendas.${f.k}" aria-label="${f.lbl} em ${fmtDateBR(d.data)}" value="${fmtN(d.vendas?.[f.k])}"/></td>`).join("")}
+      <td class="grp-end"><input type="text" data-field="abertura" value="${cashDraftDisplay(d,'abertura',d.abertura,true)}"/></td>
+      <td><input type="text" data-field="responsavel" value="${cashDraftDisplay(d,'responsavel',d.responsavel||"")}"/></td>
+      ${SALES_CHANNELS.map((f,i)=>`<td class="${salesColumnClass(i)}"><input type="text" data-field="vendas.${f.k}" aria-label="${f.lbl} em ${fmtDateBR(d.data)}" value="${cashDraftDisplay(d,'vendas.'+f.k,d.vendas?.[f.k],true)}"/></td>`).join("")}
       <td class="grp-end td-total"><strong>${fmt(totalDay(d))}</strong></td>
-      ${motoboysDoMes.map((m,i) => `<td ${i===0?'class="grp-start"':''}><input type="text" data-field="motoboys.${m.id}" value="${fmtN(d.motoboys?.[m.id])}"/></td>`).join("")}
+      ${motoboysDoMes.map((m,i) => `<td ${i===0?'class="grp-start"':''}><input type="text" data-field="motoboys.${m.id}" value="${cashDraftDisplay(d,'motoboys.'+m.id,d.motoboys?.[m.id],true)}"/></td>`).join("")}
       <td class="grp-end grp-start td-total td-auto"><strong>${fmt(motoTotalDay(d))}</strong></td>
-      <td class="td-obs"><input type="text" data-field="observacao" value="${escapeHtml(d.observacao||"")}" placeholder="Observação"/></td>
+      <td class="td-obs"><input type="text" data-field="observacao" value="${cashDraftDisplay(d,'observacao',d.observacao||"")}" placeholder="Observação"/></td>
       <td><button class="row-del" title="Excluir lançamento" aria-label="Excluir lançamento">
         <svg class="trash-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
       </button></td>
@@ -1477,8 +1632,10 @@ function renderCash() {
   `;
 
   body.querySelectorAll("input").forEach(inp => {
+    inp.disabled=!!cashPending(inp.closest("tr")?.dataset.id,"__day");
+    inp.addEventListener("input", cashStageInput);
     inp.addEventListener("change", onCellChange);
-    inp.addEventListener("blur", onCellChange);
+    inp.addEventListener("blur", cashFieldBlur);
   });
   body.querySelectorAll('input[data-field^="motoboys."]').forEach(inp => {
     inp.addEventListener("input", updateMotoRowTotalPreview);
@@ -1486,8 +1643,7 @@ function renderCash() {
   body.querySelectorAll(".row-del").forEach(btn => btn.addEventListener("click", e => {
     const row = e.target.closest("tr"); const id = row.dataset.id;
     if (confirm(`Excluir lançamento de ${fmtDateBR(id)}?`)) {
-      state.caixa = state.caixa.filter(d=>d.data!==id);
-      persist("caixa", id, null); render();
+      const day=state.caixa.find(d=>d.data===id);if(day)cashQueueDay(day,"delete");
     }
   }));
 
@@ -1581,25 +1737,10 @@ function updateMotoRowTotalPreview(e) {
 }
 
 function onCellChange(e) {
-  const row = e.target.closest("tr"); const id = row.dataset.id;
-  const day = state.caixa.find(d=>d.data===id); if (!day) return;
-  const field = e.target.dataset.field;
-  let value = e.target.value;
-  const textFields = new Set(["responsavel", "observacao"]);
-  if (!textFields.has(field)) value = parseNum(value);
-  if (field.includes(".")) {
-    const [a,b] = field.split(".");
-    day[a] = day[a] || {}; day[a][b] = value;
-  } else { day[field] = value; }
-
-  // Pag. motoboy é calculado em tela pela soma das colunas dos motoboys.
-  // Importante para multiusuário: salvamos apenas a célula alterada, evitando sobrescrever
-  // valores de outro computador que esteja editando outra coluna ao mesmo tempo.
-  if (field.startsWith("motoboys.")) {
-    day.pagto_moto = motoTotalDay(day);
-  }
-  persistField("caixa", id, field, value);
-  renderCash();
+  const row=e.target.closest("tr"),day=state.caixa.find(d=>d.data===row?.dataset.id);if(!day)return;
+  const field=e.target.dataset.field,textFields=new Set(["responsavel","observacao"]);
+  const value=textFields.has(field)?e.target.value:parseNum(e.target.value);
+  cashQueueField(day,field,value);
 }
 
 function renderCoins() {
@@ -1674,8 +1815,8 @@ $("#btnAddDay").addEventListener("click", () => {
       motoboys: Object.fromEntries(motoboysDoMes(monthKey(vals.data)).map(m=>[m.id,0])),
       observacao: "",
     };
-    state.caixa.push(novo); state.monthFilter = monthKey(vals.data);
-    persist("caixa", novo.data, novo); render();
+    state.monthFilter = monthKey(vals.data);
+    return cashQueueDay(novo,"create");
   });
 });
 
@@ -1992,7 +2133,7 @@ function openModal(title, fields, onSave) {
   $("#modalSave").onclick = () => {
     const vals = {};
     fields.forEach(f => vals[f.name] = $(`#modalBody input[name="${f.name}"]`).value);
-    onSave(vals); closeModal();
+    if(onSave(vals)!==false)closeModal();
   };
 }
 function openModalRaw(title, htmlBody) {
