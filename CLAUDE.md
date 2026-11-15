@@ -6,7 +6,7 @@ Caixa diário, visão gerencial, produção, compras, agenda financeira e pagame
 - GitHub Pages da branch `main` (https://marcelomreidogado-cmd.github.io/caixa-burger-do-rei/). Push na `main` publica sozinho. `.nojekyll` mantém o site estático.
 
 ## Arquitetura
-- `index.html` é o app inteiro (~115 KB, sem build). Versão no `<title>` (atual: v10.3).
+- `index.html` é o app inteiro (~115 KB, sem build). Versão no `<title>` (atual: v10.4).
 - Firebase **modular** 10.12.2 (`firebase-app.js`/`firebase-firestore.js`, ES modules), Chart.js 4.4.1.
 - Firebase projeto `studio-1719325280-f2519`. Coleções: `caixa`, `motoboys`, `producao`, `compras`, `moedas`, `depositos_caixa`.
 - Telas (`data-view`): `cash` (Caixa Diário), `overview` (Visão gerencial), `production`, `purchases`, `motoboy`, `schedule` (Agenda Financeira).

@@ -5,7 +5,7 @@
 <meta name="caixa-build" content="CAIXA_BURGER_2026_11_08_RASCUNHOS_V1">
 <!-- Rascunhos locais e gravação transacional das edições do caixa. A integração de fechamento mensal permanece desativada. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Caixa Rei do Gado — v10.3 99Food · Executivo Multiusuário Firebase</title>
+  <title>Caixa Rei do Gado — v10.4 99Food · Executivo Multiusuário Firebase</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -584,6 +584,41 @@ p { margin: 4px 0 0; }
   background: #FEE2E2;
   color: var(--danger);
 }
+
+/* ── POLIMENTO VISUAL (nov/2026) ── */
+/* Agenda: texto escuro sobre o laranja (o branco sobre laranja claro era ilegível) */
+.cal-cell.has-value .cal-num { color:#7C2D12; }
+.cal-val { color:#431407; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+.cal-cell.passado.has-value { opacity:1; filter:saturate(.75); }
+.cal-cell.passado.has-value .cal-val { color:#5B2A12; }
+.cal-ifood { box-shadow:none; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cal-ifood + .cal-ifood { margin-top:3px; }
+.cal-cell.nao-util:not(.has-value) .cal-num { color:#A3A3A3; }
+.cal-head h3 { text-transform:none; }
+.cal-head h3::first-letter { text-transform:uppercase; }
+.cal-grid { grid-template-columns:repeat(7, minmax(0,1fr)); }
+.cv-short { display:none; }
+.cal-cell { min-width:0; }
+@media (max-width: 720px) {
+  /* calendário cabe na tela do celular (antes sexta a domingo ficavam cortados) */
+  .cal-grid { grid-template-columns:repeat(7, minmax(0,1fr)); gap:3px; }
+  .cal-cell { min-height:58px; padding:4px 3px; border-radius:7px; }
+  .cal-val { font-size:11px; line-height:1.15; white-space:nowrap; }
+  .cv-full { display:none; } .cv-short { display:inline; }
+  .cal-num { font-size:10.5px; }
+  .cal-recebido { width:12px; height:12px; font-size:8px; }
+  .cal-ifood { font-size:0; padding:0; height:5px; border-radius:3px; margin-top:auto; }
+  .cal-ifood + .cal-ifood { margin-top:2px; }
+  .cal-head { gap:8px; }
+  .cal-head h3 { min-width:0; flex:1; font-size:16px; }
+  .cal-total { margin-left:0; width:100%; align-items:flex-start; }
+  /* meses do caixa em uma faixa rolável, ocupando menos espaço */
+  .cash-month-grid { display:flex; overflow-x:auto; gap:6px; padding-bottom:4px; scroll-snap-type:x proximity; scrollbar-width:none; }
+  .cash-month-grid::-webkit-scrollbar { display:none; }
+  .cash-month-button { flex:0 0 64px; min-height:58px; padding:8px 4px; gap:4px; scroll-snap-align:start; }
+  .cash-month-button svg { width:20px; height:20px; }
+}
+.btn:focus-visible, .nav-item:focus-visible, .icon-btn:focus-visible { outline:3px solid var(--orange-500); outline-offset:2px; }
 </style>
 </head>
 <body>
@@ -1401,6 +1436,9 @@ function renderCashMonthNavigation() {
   grid.querySelectorAll("button").forEach(button => {
     button.setAttribute("aria-pressed", String(button.dataset.month === state.monthFilter));
   });
+  // No celular os meses ficam numa faixa rolável: mantém o mês ativo visível (sem mexer na rolagem da página).
+  const ativo = grid.querySelector('[aria-pressed="true"]');
+  if (ativo && grid.scrollWidth > grid.clientWidth) grid.scrollLeft = Math.max(0, ativo.offsetLeft - grid.offsetLeft - (grid.clientWidth - ativo.offsetWidth) / 2);
   $("#cashYear").textContent = year;
   $("#cashPrevYear").disabled = Number(year) <= 1;
   $("#cashNextYear").disabled = Number(year) >= 9999;
@@ -2082,7 +2120,7 @@ function renderSchedule() {
       const food99Val = info.formas["99Food"] || 0;
       const food99Pill = food99Val > 0 ? `<div class="cal-ifood">99Food ${fmt(food99Val)}</div>` : "";
       cell.innerHTML = `<div class="cal-top"><div class="cal-num">${d}</div>${iso<hoje?'<span class="cal-recebido" title="já recebido">✓</span>':''}</div>
-                        <div class="cal-val">${fmt(info.total)}</div>
+                        <div class="cal-val"><span class="cv-full">${fmt(info.total)}</span><span class="cv-short">${info.total>=1000?(info.total/1000).toLocaleString("pt-BR",{maximumFractionDigits:1})+" mil":Math.round(info.total)}</span></div>
                         ${ifoodPill}${food99Pill}`;
       if (ifoodVal > 0) cell.classList.add("tem-ifood");
       cell.addEventListener("click", () => showDayDetails(iso, info));
